@@ -2,6 +2,7 @@ import pandas as pd
 import json
 import avwx
 import random
+from time import sleep
 
 
 color_key = {'VFR': 'green', 'MVFR': 'blue', 'IFR': 'red', 'LIFR': 'fuchsia'}
@@ -51,18 +52,25 @@ def get_flight_rules(airports):
     # Iterating through list of airports
     for entry in airports:
         airport = entry[0]
+        print(f'Retrieving data for {airport}')
         # Creating a METAR object and fetching current data
-        current_report = avwx.Metar(airport)
-        current_report.update()
         try:
-            # Adding current flight rules to list
-            current_rules.append(current_report.data.flight_rules)
-            # Storing rule in variable for color list
-            current_field_condition = current_report.data.flight_rules
-            # Populating empty color list based on current rules
-            color_codes.append(color_key[current_field_condition])
-        except AttributeError:
+            current_report = avwx.Metar(airport)
+            current_report.update()
+            try:
+                # Adding current flight rules to list
+                current_rules.append(current_report.data.flight_rules)
+                # Storing rule in variable for color list
+                current_field_condition = current_report.data.flight_rules
+                # Populating empty color list based on current rules
+                color_codes.append(color_key[current_field_condition])
+                if len(current_rules) % 15 == 0:
+                    sleep(2)
+            except AttributeError:
+                pass
+        except avwx.exceptions.BadStation:
             pass
+
 
     print('Flight rules complete')
     # Returning list of flight rules
@@ -76,5 +84,20 @@ def randomize_report(airport_list, group_size):
         randomized_indices.append(random.randrange(upper_limit))
     random_fields = [airport_list[i] for i in randomized_indices]
     return random_fields
+
+
+# Currently unused.
+def cache_results(airports):
+    list_size = len(airports)
+    current_rules, color_codes = [], []
+    for i in range(0, list_size, 15):
+        print(f'Retrieving data up to airport {i}')
+        cache_rules, cache_rules = get_flight_rules(airports[:i])
+        current_rules += cache_rules
+        color_codes += color_codes
+        sleep(2)
+    print(f'Cache complete')
+    return current_rules, color_codes
+
 
 
