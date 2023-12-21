@@ -3,10 +3,12 @@ import json
 import avwx
 import random
 from time import sleep
-
+import plotly.express as px
 
 color_key = {'VFR': 'green', 'MVFR': 'blue', 'IFR': 'red', 'LIFR': 'fuchsia'}
 icao_exclusion_list = ['KCWS', 'KEYQ']
+# Marks whether any excluded airports have been found
+exclusion_flag = False
 
 
 def open_airport_json(filename):
@@ -17,12 +19,18 @@ def open_airport_json(filename):
     return raw_airports
 
 
-def parse_json(country, data_json):
+def parse_json(country, data_json, state_filters=None):
     filtered_airports = []
-    for entry in data_json:
-        if data_json[entry]["country"] == country:
-            filtered_airports.append([data_json[entry]["icao"], data_json[entry]["name"],
-                                      data_json[entry]["lat"], data_json[entry]["lon"]])
+    if state_filters:
+        for entry in data_json:
+            if data_json[entry]["country"] == country and data_json[entry]["state"] in state_filters:
+                filtered_airports.append([data_json[entry]["icao"], data_json[entry]["name"],
+                                          data_json[entry]["lat"], data_json[entry]["lon"]])
+    else:
+        for entry in data_json:
+            if data_json[entry]["country"] == country:
+                filtered_airports.append([data_json[entry]["icao"], data_json[entry]["name"],
+                                          data_json[entry]["lat"], data_json[entry]["lon"]])
     return filtered_airports
 
 
@@ -44,13 +52,14 @@ def remove_closed(airport_list):
 
 
 # Working, need a good way to reduce size of airport list
-def get_flight_rules(airports):
-    # Creating empty list to store flight rule values
-    current_rules = []
-    # Empty list to store colors corresponding to current rules
-    color_codes = []
-    # Iterating through list of airports
-    for entry in airports:
+def get_flight_rules(airports: list):
+    """
+    Retrieves current weather conditions of provided airports
+    :param airports: Nested list of airports
+    :return: Original nested list of airports with both current condition
+    """
+    # Iterating through list of airports, enumerate for pausing
+    for count, entry in enumerate(airports):
         airport = entry[0]
         print(f'Retrieving data for {airport}')
         # Creating a METAR object and fetching current data
@@ -59,22 +68,22 @@ def get_flight_rules(airports):
             current_report.update()
             try:
                 # Adding current flight rules to list
-                current_rules.append(current_report.data.flight_rules)
+                entry.append(current_report.data.flight_rules)
                 # Storing rule in variable for color list
                 current_field_condition = current_report.data.flight_rules
                 # Populating empty color list based on current rules
-                color_codes.append(color_key[current_field_condition])
-                if len(current_rules) % 15 == 0:
+                entry.append(color_key[current_field_condition])
+                if count % 15 == 0:
                     sleep(2)
             except AttributeError:
                 pass
         except avwx.exceptions.BadStation:
+            # Adding experimental code to attempt to create a list of fields that are closed
+            icao_exclusion_list.append(entry[0])
             pass
-
-
     print('Flight rules complete')
     # Returning list of flight rules
-    return current_rules, color_codes
+    return airports
 
 
 def randomize_report(airport_list, group_size):
@@ -86,18 +95,32 @@ def randomize_report(airport_list, group_size):
     return random_fields
 
 
-# Currently unused.
-def cache_results(airports):
-    list_size = len(airports)
-    current_rules, color_codes = [], []
-    for i in range(0, list_size, 15):
-        print(f'Retrieving data up to airport {i}')
-        cache_rules, cache_rules = get_flight_rules(airports[:i])
-        current_rules += cache_rules
-        color_codes += color_codes
-        sleep(2)
-    print(f'Cache complete')
-    return current_rules, color_codes
+# This works now
+def compile_data(airports_list):
+    """
+    Compiles list of airport data
+    :param airports_list: Nested list of airports and related weather conditions
+    :return: Pandas DataFrame containing airport information
+    """
+    airports_list = [i for i in airports_list if len(i) == 6]
+    airport_weather = pd.DataFrame(airports_list, columns=['Identifier', 'Name', 'Lat', 'Lon', 'Condition', 'Color'])
+    return airport_weather
 
+
+def metar_mapper(airports: pd.DataFrame):
+    # Plotting results
+    print('Displaying map')
+    metar_map = px.scatter_geo(airports, lat='Lat', lon='Lon', color='Condition', color_discrete_map=color_key,
+                               hover_name='Name')
+    metar_map.update_geos(scope='usa')
+    metar_map.show()
+    return None
+
+
+def save_exclusion_list():
+    with open('excluded_fields', 'w') as f:
+        f.writelines(icao_exclusion_list)
+        f.close()
+    return None
 
 
