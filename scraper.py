@@ -4,9 +4,17 @@ import avwx
 import random
 from time import sleep
 import plotly.express as px
+from datetime import datetime, timezone
+from urllib.request import urlretrieve
+import gzip
+import shutil
+import os
+
+cache_url = 'https://aviationweather.gov/data/cache/metars.cache.csv.gz'
+cache_file = 'metar.cache.csv.gz'
 
 color_key = {'VFR': 'green', 'MVFR': 'blue', 'IFR': 'red', 'LIFR': 'fuchsia'}
-icao_exclusion_list = ['KCWS', 'KEYQ']
+icao_exclusion_list = ['KEYQ', 'KCWS']
 # Marks whether any excluded airports have been found
 exclusion_flag = False
 
@@ -22,6 +30,7 @@ def open_airport_json(filename):
 def parse_json(country, data_json, state_filters=None):
     filtered_airports = []
     if state_filters:
+        state_filters = regex_scary(state_filters)
         for entry in data_json:
             if data_json[entry]["country"] == country and data_json[entry]["state"] in state_filters:
                 filtered_airports.append([data_json[entry]["icao"], data_json[entry]["name"],
@@ -32,6 +41,16 @@ def parse_json(country, data_json, state_filters=None):
                 filtered_airports.append([data_json[entry]["icao"], data_json[entry]["name"],
                                           data_json[entry]["lat"], data_json[entry]["lon"]])
     return filtered_airports
+
+
+def regex_scary(filter_list):
+    for element in filter_list:
+        if ' ' in element:
+            interim = ' '.split(element)
+            filter_list.append('-'.join(interim))
+        else:
+            continue
+    return filter_list
 
 
 def filter_numbered_fields(airport_list):
@@ -51,6 +70,11 @@ def remove_closed(airport_list):
     return final
 
 
+def get_current_time():
+    now = datetime.now(timezone.utc)
+    return now.strftime('%d%b%y, %H%MZ').upper()
+
+
 # Working, need a good way to reduce size of airport list
 def get_flight_rules(airports: list):
     """
@@ -58,6 +82,7 @@ def get_flight_rules(airports: list):
     :param airports: Nested list of airports
     :return: Original nested list of airports with both current condition
     """
+    global exclusion_flag
     # Iterating through list of airports, enumerate for pausing
     for count, entry in enumerate(airports):
         airport = entry[0]
@@ -79,9 +104,13 @@ def get_flight_rules(airports: list):
                 pass
         except avwx.exceptions.BadStation:
             # Adding experimental code to attempt to create a list of fields that are closed
+            exclusion_flag = True
             icao_exclusion_list.append(entry[0])
             pass
     print('Flight rules complete')
+    if exclusion_flag:
+        save_exclusion_list()
+        print('Exclusion list updated')
     # Returning list of flight rules
     return airports
 
@@ -108,10 +137,12 @@ def compile_data(airports_list):
 
 
 def metar_mapper(airports: pd.DataFrame):
+    report_time = get_current_time()
+    report_title = f'Report generated at {report_time}'
     # Plotting results
     print('Displaying map')
     metar_map = px.scatter_geo(airports, lat='Lat', lon='Lon', color='Condition', color_discrete_map=color_key,
-                               hover_name='Name')
+                               hover_name='Name', title=report_title)
     metar_map.update_geos(scope='usa')
     metar_map.show()
     return None
@@ -119,8 +150,48 @@ def metar_mapper(airports: pd.DataFrame):
 
 def save_exclusion_list():
     with open('excluded_fields', 'w') as f:
-        f.writelines(icao_exclusion_list)
+        for entry in icao_exclusion_list:
+            f.writelines(entry + '\n')
         f.close()
+    print(icao_exclusion_list)
     return None
+
+
+def get_cache():
+    urlretrieve(cache_url, cache_file)
+    return None
+
+
+def extract_cache():
+    with gzip.open(cache_file, 'rb') as f_in:
+        with open('metar.cache.csv', 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    # Get rid of first five lines, load to dataframe
+    airport_weather = pd.read_csv('metar.cache.csv', skiprows=5)
+    return airport_weather
+
+
+def compile_awc():
+    get_cache()
+    data = extract_cache()
+    os.remove(f'/home/enzi/eMFmapper/{cache_file}')
+    os.remove('/home/enzi/eMFmapper/metar.cache.csv')
+    return data
+
+
+def awc_mapper(airports: pd.DataFrame):
+    report_time = get_current_time()
+    report_title = f'Report generated at {report_time}'
+    # Plotting results
+    print('Displaying map')
+    metar_map = px.scatter_geo(airports, lat='latitude', lon='longitude', color='flight_category',
+                               color_discrete_map=color_key, hover_name='station_id', title=report_title)
+    metar_map.update_geos(scope='usa')
+    metar_map.show()
+    return None
+
+
+
+
 
 
